@@ -1,14 +1,14 @@
 {
   "name": "Борей-89 — личные дела",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "manifest_version": 1,
   "author": "Борей-89",
-  "description": "Интерактивные личные дела четырёх сотрудников НИИ. Приватная комнатная игра с серверной проверкой доступа.",
-  "icon": "/icon.svg",
+  "description": "Статические листы четырёх профессий. Сохранение и синхронизация в комнате Owlbear Rodeo, без сервера и кодов доступа.",
+  "icon": "/borey-89/icon.svg",
   "action": {
     "title": "Борей-89 · Личное дело",
-    "icon": "/icon.svg",
-    "popover": "/",
+    "icon": "/borey-89/icon.svg",
+    "popover": "/borey-89/",
     "width": 440,
     "height": 700
   }

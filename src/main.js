@@ -1,44 +1,77 @@
 import OBR from '@owlbear-rodeo/sdk';
 import './style.css';
 import { roles, symptoms, limits, makeCharacter, validateCharacter } from './model.js';
+import { RoomStore, makeRecord, keyFor } from './room-store.js';
 
 const $ = id => document.getElementById(id);
-const clone = value => structuredClone(value);
-let mode = 'login', gm = false, sheets = [], selected = 0, roomId = '', playerId = 'browser';
-let token = '', storageKey = '', sessionKey = '', dirty = false, blocked = false, saving = null, editVersion = 0, saveTimer;
+let mode = 'loading', gm = false, sheets = [], selected = 0, playerId = 'browser', playerName = 'Игрок', ownerId = 'browser';
+let store, unsubscribe, dirty = false, blocked = false, saving = null, editVersion = 0, saveTimer, pendingRevision = null;
+const localKey = 'borey89:static-demo:v2';
 const current = () => sheets.find(s => s.slot === selected);
 const status = text => { $('saveStatus').textContent = text; };
-const storageRead = (storage, key) => { try { return storage.getItem(key); } catch { return null; } };
-const storageWrite = (storage, key, value) => { try { value === null ? storage.removeItem(key) : storage.setItem(key, value); return true; } catch { return false; } };
-const session = { get: key => { try { return storageRead(sessionStorage, key); } catch { return null; } }, set: (key, val) => { try { return storageWrite(sessionStorage, key, val); } catch { return false; } } };
-function setControls(enabled) {
-  $('role').disabled = !enabled;
-  $('reset').disabled = !enabled;
-}
-setControls(false);
-
-async function api(path, options = {}) {
-  const response = await fetch('/api' + path, {
-    ...options, cache: 'no-store', signal: AbortSignal.timeout(10000),
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token, 'X-OBR-Room': roomId } : {}), ...options.headers },
-  });
-  const body = await response.json().catch(() => ({ error: 'Сервер недоступен или возвращает неверный ответ.' }));
-  if (!response.ok) throw new Error(body.error || `Ошибка сервера: ${response.status}`);
-  return body;
+function controls(disabled) { $('role').disabled = $('owner').disabled = $('reset').disabled = disabled; }
+controls(true);
+function ownerOptions() {
+  const owners = store?.owners() ?? new Map(); owners.set(playerId, playerName);
+  $('owner').replaceChildren(...[...owners].map(([id, name]) => new Option((name || id) + (id === playerId ? ' (вы)' : ''), id)));
+  $('owner').value = ownerId;
 }
 function showSheets() {
-  $('sheet').hidden = false;
-  $('loginForm').hidden = true;
-  $('logout').hidden = false;
-  $('role').replaceChildren(...sheets.map(s => new Option(roles[s.slot], String(s.slot))));
-  if (!sheets.some(s => s.slot === selected)) selected = sheets[0].slot;
+  $('sheet').hidden = false; controls(false);
+  $('role').replaceChildren(...roles.map((name, slot) => new Option(name, String(slot))));
   $('role').value = String(selected);
-  $('role').disabled = sheets.length === 1;
-  $('reset').disabled = false;
-  $('connectionStatus').textContent = mode === 'local'
-    ? 'ЛОКАЛЬНАЯ ПРОБА · данные только в этом браузере; синхронизации и защиты между пользователями браузера нет.'
-    : `Комната ${roomId} · ${gm ? 'Ведущий: все четыре дела' : 'Игрок: только своё дело'} · синхронизация каждые 2 секунды`;
-  render();
+  $('ownerControl').hidden = !gm;
+  ownerOptions(); render();
+}
+function protectDraft(message) {
+  blocked = true; status(message + ' Черновик оставлен в этом окне.'); $('conflictActions').hidden = false;
+}
+function changed() {
+  dirty = true; editVersion++;
+  if (blocked) { status('Есть несохранённый черновик. Скачайте его или повторите сохранение после исправления ошибки.'); return; }
+  status('Есть несохранённые изменения…');
+  clearTimeout(saveTimer); saveTimer = setTimeout(() => { void flush(); }, 350);
+}
+async function flush() {
+  clearTimeout(saveTimer);
+  if (saving) return saving;
+  if (!dirty || blocked) return !blocked;
+  const entry = current(), version = editVersion;
+  if (mode === 'local') {
+    try {
+      if (!sheets.every(s => validateCharacter(s.character))) throw new Error('Недопустимые данные листа.');
+      localStorage.setItem(localKey, JSON.stringify(sheets)); dirty = false; status('Сохранено в этом браузере (проба)'); return true;
+    } catch (error) { protectDraft('Не удалось сохранить в браузере: ' + error.message); return false; }
+  }
+  let record;
+  try { record = makeRecord(ownerId, ownerId === playerId ? playerName : store.owners().get(ownerId) || ownerId, selected, entry.character); }
+  catch (error) { protectDraft(error.message); return false; }
+  pendingRevision = record.revision;
+  status('Сохранение в комнате Owlbear…');
+  saving = (async () => {
+    try {
+      const saved = await store.save(record, entry.revision);
+      entry.revision = saved.revision;
+      if (version === editVersion && !blocked) { dirty = false; status('Сохранено в комнате Owlbear'); }
+      return !blocked;
+    } catch (error) { protectDraft(error.message); return false; }
+    finally { saving = null; pendingRevision = null; if (dirty && !blocked) saveTimer = setTimeout(() => { void flush(); }, 100); }
+  })();
+  return saving;
+}
+function receiveRoomUpdate() {
+  try {
+    ownerOptions();
+    const incoming = store.sheets(ownerId);
+    const remote = incoming[selected];
+    if (remote.revision === pendingRevision && pendingRevision !== null) return;
+    if (dirty || saving || blocked) {
+      if (remote.revision !== current().revision) protectDraft('Этот лист изменён в другом окне. Скачайте черновик перед загрузкой общей версии.');
+      return;
+    }
+    if (remote.revision !== current().revision) { sheets = incoming; render(); status('Получены изменения комнаты'); }
+    else sheets = incoming;
+  } catch (error) { protectDraft(error.message); }
 }
 function render() {
   const entry = current();
@@ -50,10 +83,7 @@ function render() {
     $(id + 'Value').textContent = s[key] + ' / ' + max;
     $(id + 'Bar').style.width = s[key] / max * 100 + '%';
   }
-  // No player-visible output derives from hidden values, including CSS or condition text.
   $('condition').textContent = s.health === 0 ? 'Требуется помощь' : s.stress >= 4 ? 'Высокий стресс' : 'Состояние удовлетворительное';
-  $('gmPanel').classList.toggle('hidden', !gm);
-  for (const key of ['cold', 'infection', 'hallucinations']) $(key + 'Value').textContent = gm ? entry.hidden[key] + ' / 10' : '';
   $('symptomChecks').replaceChildren(...symptoms.map((label, index) => {
     const row = document.createElement('label'); row.className = 'check';
     const check = document.createElement('input'); check.type = 'checkbox'; check.dataset.symptom = index; check.checked = s.symptoms.includes(label);
@@ -66,71 +96,10 @@ function render() {
     const remove = document.createElement('button'); remove.className = 'action'; remove.dataset.remove = index; remove.textContent = 'Убрать ×'; remove.setAttribute('aria-label', 'Убрать предмет ' + text);
     row.append(label, remove); return row;
   }));
-  for (const [id, key] of [['name', 'name'], ['secret', 'secret'], ['notesText', 'notes'], ['tasksText', 'tasks']]) {
+  for (const [id, key] of [['name', 'name'], ['notesText', 'notes'], ['tasksText', 'tasks']]) {
     if ($(id).value !== s[key]) $(id).value = s[key];
   }
 }
-function protectDraft(message) {
-  blocked = true;
-  status(message + ' Черновик оставлен в окне. Скачайте его перед выходом.');
-  $('conflictActions').hidden = false;
-  $('reloadRemote').textContent = mode === 'local' ? 'Повторить сохранение в браузере' : 'Загрузить серверную версию';
-}
-function changed() {
-  dirty = true; editVersion++;
-  if (blocked) { status('Есть несохранённые правки. Скачайте черновик или загрузите серверную версию.'); return; }
-  status(mode === 'local' ? 'Сохранение в браузере…' : 'Есть несохранённые изменения…');
-  clearTimeout(saveTimer); saveTimer = setTimeout(() => { void flush(); }, 450);
-}
-async function flush() {
-  clearTimeout(saveTimer);
-  if (saving) return saving;
-  if (!dirty || blocked) return !blocked;
-  if (mode === 'local') {
-    let ok = false;
-    try { ok = storageWrite(localStorage, storageKey, JSON.stringify(sheets)); } catch { /* storage denied */ }
-    if (!ok) { protectDraft('Браузер запретил сохранение.'); return false; }
-    dirty = false; status('Сохранено в этом браузере'); return true;
-  }
-  const entry = current(), snapshot = clone(entry), version = editVersion;
-  status('Сохранение на сервере…');
-  saving = (async () => {
-    try {
-      const saved = await api('/sheets/' + selected, { method: 'PATCH', body: JSON.stringify({ revision: snapshot.revision, character: snapshot.character, ...(gm ? { hidden: snapshot.hidden } : {}) }) });
-      entry.revision = saved.revision;
-      if (version === editVersion) { dirty = false; status('Сохранено в комнате'); }
-      return true;
-    } catch (error) { protectDraft(error.message); return false; }
-    finally { saving = null; if (dirty && !blocked) saveTimer = setTimeout(() => { void flush(); }, 100); }
-  })();
-  return saving;
-}
-async function refresh() {
-  if (mode !== 'online' || dirty || saving || blocked) return;
-  const version = editVersion;
-  try {
-    const data = await api('/sheets');
-    if (dirty || saving || blocked || version !== editVersion || mode !== 'online') return;
-    const old = current()?.revision;
-    sheets = data.sheets;
-    if (old !== current()?.revision) { render(); status('Получены изменения из комнаты'); }
-  } catch (error) { if (mode === 'online' && !dirty) status('Синхронизация приостановлена: ' + error.message); }
-}
-async function loadOnline() {
-  const data = await api('/sheets');
-  sheets = data.sheets; gm = data.role === 'GM'; mode = 'online'; dirty = false; blocked = false;
-  $('conflictActions').hidden = true; showSheets(); status('Данные загружены из комнаты');
-}
-function startLocal() {
-  mode = 'local'; gm = false; token = ''; dirty = false; blocked = false;
-  sheets = roles.map((_, slot) => ({ slot, revision: 0, character: makeCharacter(slot) }));
-  try {
-    const saved = JSON.parse(storageRead(localStorage, storageKey) || 'null');
-    if (Array.isArray(saved) && saved.length === 4 && saved.every((s, i) => s.slot === i && validateCharacter(s.character))) sheets = saved.map(s => ({ slot: s.slot, revision: 0, character: s.character }));
-  } catch { status('Локальное сохранение повреждено; исходная запись сохранена в браузере.'); }
-  showSheets(); status('Локальная проба. Первое изменение проверит доступность сохранения.');
-}
-
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => {
   document.querySelectorAll('[data-tab]').forEach(b => { b.classList.toggle('active', b === button); b.setAttribute('aria-selected', String(b === button)); });
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === button.dataset.tab));
@@ -140,7 +109,7 @@ document.addEventListener('click', event => {
   const step = event.target.closest('[data-change]');
   if (step) {
     const [key, delta] = step.dataset.change.split(':');
-    const target = ['health', 'stress'].includes(key) ? current().character : gm ? current().hidden : null;
+    const target = current().character;
     if (!target || !Object.hasOwn(limits, key)) return;
     target[key] = Math.min(limits[key], Math.max(0, target[key] + Number(delta)));
     changed(); render();
@@ -158,10 +127,10 @@ document.addEventListener('change', event => {
 $('addItem').addEventListener('submit', event => {
   event.preventDefault(); const value = $('itemInput').value.trim();
   if (!value || !current()) return;
-  if (current().character.items.length >= 100) { status('Максимум 100 предметов.'); return; }
+  if (current().character.items.length >= 40) { status('Максимум 40 предметов.'); return; }
   current().character.items.push(value); $('itemInput').value = ''; changed(); render();
 });
-for (const [id, key, max] of [['name', 'name', 200], ['secret', 'secret', 10000], ['notesText', 'notes', 20000], ['tasksText', 'tasks', 10000]]) {
+for (const [id, key, max] of [['name', 'name', 200], ['notesText', 'notes', 2000], ['tasksText', 'tasks', 1500]]) {
   $(id).maxLength = max;
   $(id).addEventListener('input', event => { if (current()) { current().character[key] = event.target.value; changed(); } });
 }
@@ -169,74 +138,89 @@ $('role').addEventListener('change', async event => {
   const next = Number(event.target.value);
   $('role').disabled = true;
   while (dirty && !blocked) await flush();
-  if (!blocked) { selected = next; render(); }
+  if (!blocked) {
+    try { if (mode === "room") sheets = store.sheets(ownerId); selected = next; render(); }
+    catch (error) { status(error.message); }
+  }
   $('role').value = String(selected); $('role').disabled = sheets.length === 1;
 });
 $('reset').addEventListener('click', () => {
-  if (current() && confirm('Сбросить карточку «' + roles[selected] + '»? Скрытые показатели ведущего сохранятся.')) {
+  if (current() && confirm('Сбросить карточку «' + roles[selected] + '»? ')) {
     current().character = makeCharacter(selected); changed(); render();
   }
 });
-$('loginForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  const submit = $('loginForm').querySelector('button'); submit.disabled = true;
-  try {
-    if (!OBR.isAvailable) roomId = $('roomId').value.trim();
-    if (!OBR.isAvailable) session.set('borey89:last-test-room', roomId);
-    const result = await api('/login', { method: 'POST', body: JSON.stringify({ code: $('accessCode').value.trim(), roomId }) });
-    token = result.token; session.set(sessionKeyForRoom(), token); $('accessCode').value = '';
-    await loadOnline();
-  } catch (error) { status(error.message); }
-  finally { submit.disabled = false; }
-});
-$('localMode').addEventListener('click', startLocal);
-function sessionKeyForRoom() { return 'borey89:session:v1:' + roomId + ':' + playerId; }
-$('logout').addEventListener('click', async () => {
-  if ((dirty || blocked) && !confirm('Есть несохранённый черновик. Выйти и потерять его?')) return;
-  clearTimeout(saveTimer);
-  if (saving) await saving;
-  if (mode === 'online') {
-    try { await api('/logout', { method: 'POST' }); } catch (error) { status('Не удалось отозвать сессию: ' + error.message); return; }
+$('owner').addEventListener('change', async event => {
+  const next = event.target.value; controls(true);
+  while (dirty && !blocked) await flush();
+  if (!blocked) {
+    try { const incoming = store.sheets(next); ownerId = next; sheets = incoming; render(); }
+    catch (error) { status(error.message); }
   }
-  session.set(sessionKeyForRoom(), null); token = ''; sheets = []; mode = 'login'; gm = false; dirty = blocked = false;
-  for (const id of ['name', 'secret', 'notesText', 'tasksText']) $(id).value = '';
-  for (const id of ['coldValue', 'infectionValue', 'hallucinationsValue', 'itemList', 'symptomChecks']) $(id).replaceChildren();
-  $('gmPanel').classList.add('hidden');
-  $('sheet').hidden = true; $('loginForm').hidden = false; $('logout').hidden = true; $('conflictActions').hidden = true;
-  setControls(false); status('Вы вышли.'); $('connectionStatus').textContent = 'Вход в комнату по персональному коду';
+  $('owner').value = ownerId; controls(false);
 });
 $('exportDraft').addEventListener('click', () => {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(current(), null, 2)], { type: 'application/json' }));
-  const link = document.createElement('a'); link.href = url; link.download = 'borey89-private-draft.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const url = URL.createObjectURL(new Blob([JSON.stringify({ slot: selected, character: current().character }, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'borey89-draft.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$('retrySave').addEventListener('click', async () => {
+  blocked = false; $('conflictActions').hidden = true; await flush();
 });
 $('reloadRemote').addEventListener('click', async () => {
-  if (mode === 'online' && !confirm('Заменить несохранённый черновик серверной версией? Перед этим скачайте нужные правки.')) return;
+  if (!confirm('Заменить несохранённый черновик сохранённой версией? Перед этим скачайте нужные правки.')) return;
   try {
-    if (mode === 'online') await loadOnline();
-    else { blocked = false; $('conflictActions').hidden = true; await flush(); }
+    if (saving) await saving;
+    if (mode === 'room') { await store.load(); sheets = store.sheets(ownerId); }
+    else sheets = readLocal();
+    dirty = blocked = false; $('conflictActions').hidden = true; render(); status('Сохранённая версия загружена');
   } catch (error) { status(error.message); }
 });
 $('openWindow').addEventListener('click', async () => {
   if (!OBR.isAvailable) { status('Отдельное окно доступно внутри Owlbear Rodeo.'); return; }
-  if (dirty && !await flush()) return;
-  if (dirty || blocked) { status('Сначала сохраните изменения.'); return; }
-  try { await OBR.modal.open({ id: 'borey89.sheet', url: '/?window=1', width: 1040, height: 800 }); }
-  catch (error) { status('Не удалось открыть окно: ' + error.message); }
+  while (dirty && !blocked) await flush();
+  if (dirty || blocked) return;
+  try {
+    const url = new URL(import.meta.env.BASE_URL, location.origin);
+    url.searchParams.set('window', '1'); url.searchParams.set('slot', selected); url.searchParams.set('owner', ownerId);
+    await OBR.modal.open({ id: 'borey89.sheet', url: url.href, width: 1040, height: 800 });
+  } catch (error) { status('Не удалось открыть окно: ' + error.message); }
 });
 if (new URLSearchParams(location.search).has('window')) $('openWindow').hidden = true;
 window.addEventListener('beforeunload', event => { if (dirty || saving) { event.preventDefault(); event.returnValue = ''; } });
 document.addEventListener('visibilitychange', () => { if (document.hidden && dirty) void flush(); });
-async function initialize() {
-  if (OBR.isAvailable) { roomId = OBR.room.id; playerId = await OBR.player.getId(); }
-  else roomId = session.get('borey89:last-test-room') || '';
-  storageKey = 'borey89:local:v1:' + roomId + ':' + playerId;
-  sessionKey = sessionKeyForRoom();
-  $('roomId').value = roomId; $('roomId').readOnly = OBR.isAvailable;
-  $('connectionStatus').textContent = OBR.isAvailable ? 'Owlbear Rodeo · комната ' + roomId : 'Проверка вне Owlbear Rodeo · для сетевой игры укажите ID комнаты';
-  $('loginForm').hidden = false;
-  token = session.get(sessionKey) || '';
-  if (token) { try { await loadOnline(); } catch (error) { token = ''; session.set(sessionKey, null); status(error.message); } }
-  setInterval(() => { void refresh(); }, 2000);
+function readLocal() {
+  const initial = () => roles.map((_, slot) => ({ slot, revision: null, character: makeCharacter(slot) }));
+  const raw = localStorage.getItem(localKey);
+  if (!raw) return initial();
+  const saved = JSON.parse(raw);
+  if (!Array.isArray(saved) || saved.length !== 4 || !saved.every((s, slot) => s.slot === slot && validateCharacter(s.character))) throw new Error('Локальное сохранение имеет неизвестный формат. Оно не перезаписано.');
+  return saved.map(s => ({ slot: s.slot, revision: null, character: s.character }));
 }
-function initWithError() { initialize().catch(error => { status('Ошибка SDK: ' + error.message); $('loginForm').hidden = false; }); }
+async function initialize() {
+  $('retryConnection').hidden = true;
+  if (OBR.isAvailable) {
+    [playerId, playerName, gm] = await Promise.all([OBR.player.getId(), OBR.player.getName(), OBR.player.getRole().then(role => role === 'GM')]);
+    ownerId = playerId; mode = 'room';
+    store = new RoomStore(OBR.room); await store.load();
+    const requestedOwner = new URLSearchParams(location.search).get('owner');
+    if (gm && store.owners().has(requestedOwner)) ownerId = requestedOwner;
+    sheets = store.sheets(ownerId);
+    unsubscribe?.(); unsubscribe = store.subscribe(receiveRoomUpdate);
+    $('connectionStatus').textContent = `Owlbear Rodeo · ${gm ? 'Ведущий: выберите игрока' : 'Ваши листы'} · данные общие для комнаты`;
+  } else {
+    mode = 'local'; gm = false;
+    try { sheets = readLocal(); }
+    catch (error) {
+      sheets = roles.map((_, slot) => ({ slot, revision: null, character: makeCharacter(slot) }));
+      protectDraft(error.message);
+    }
+    $('connectionStatus').textContent = 'ЛОКАЛЬНАЯ ПРОБА · только этот браузер. В Owlbear сохранение и синхронизация работают через SDK комнаты.';
+  }
+  const slot = Number(new URLSearchParams(location.search).get('slot'));
+  selected = Number.isInteger(slot) && slot >= 0 && slot < 4 ? slot : 0;
+  showSheets(); if (!blocked) status('Лист загружен. Выберите профессию.');
+}
+function initWithError() {
+  initialize().catch(error => { status('Не удалось загрузить лист: ' + error.message); $('retryConnection').hidden = false; });
+}
+$('retryConnection').addEventListener('click', initWithError);
 if (OBR.isAvailable) OBR.onReady(initWithError); else initWithError();

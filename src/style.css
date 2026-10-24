@@ -22,10 +22,12 @@ input[type=text],textarea{width:100%;padding:11px;background:#f7f0df;color:#2531
 textarea{min-height:140px;resize:vertical}.muted{font:14px/1.5 sans-serif;color:#61695f}.tag{display:inline-block;padding:5px 9px;background:#d1dccd;border:1px solid #94a78f;border-radius:3px;font:13px sans-serif}
 .item{display:flex;justify-content:space-between;align-items:center;gap:10px;border-bottom:1px dashed #b3a78e;padding:10px 0}.item button{padding:5px 9px}.add{display:flex;gap:8px;margin-top:16px}.add input{flex:1;min-width:0}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.check{display:flex;gap:9px;align-items:center;padding:10px;border:1px solid #b9ac92;background:#eee6d3}.check input{width:18px;height:18px;accent-color:#8b4e48}
-.secret{border:2px dashed #9b625d;padding:16px;background:#ead8ca}.foot{color:#bfc7b9;font:13px/1.5 sans-serif;margin:14px 3px}
-.hidden{display:none!important}.gm{border:2px solid #9a5b50;background:#f0dfd2;padding:17px;margin-top:15px}
+.foot{color:#bfc7b9;font:13px/1.5 sans-serif;margin:14px 3px}
+.hidden{display:none!important}
 @media(max-width:720px){.columns{grid-template-columns:1fr}.body{padding:12px}.head h1{font-size:25px}.head{padding:16px}.grid{grid-template-columns:1fr}.tab{padding:13px 12px}}
 [hidden]{display:none!important}
 .connection{background:#e1d7bd;margin-bottom:16px}.connection p{margin:6px 0}.connection form{display:grid;gap:10px}.connection input[type=password]{width:100%;padding:11px;background:#f7f0df;border:1px solid #9e9178;border-radius:4px}
 #saveStatus{font:14px/1.5 sans-serif;overflow-wrap:anywhere}button:disabled{opacity:.5;cursor:wait}.item span{overflow-wrap:anywhere;min-width:0}.item button{flex-shrink:0}.top>div:last-child{display:flex;align-items:center;flex-wrap:wrap;gap:6px}.top select{max-width:100%}.head{flex-wrap:wrap}.shell{margin:12px auto}.connectionStatus{overflow-wrap:anywhere}
 @media(max-width:440px){.shell{padding:0 8px}.head h1{font-size:23px}.head .eyebrow{font-size:10px}.stamp{font-size:11px}.card{padding:12px}.counter{gap:4px}.counter strong{min-width:65px}.counter .action{padding:8px 10px}.meterrow{gap:6px}.top strong{font-size:21px}.photo{height:120px}.add{flex-wrap:wrap}.add input{flex-basis:100%}.head{padding:14px}.body{padding:8px}}
+
+#ownerControl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}#owner{max-width:100%;padding:8px;background:#f7f0df;color:var(--ink);border:1px solid #9e9178}#connectionStatus{overflow-wrap:anywhere}

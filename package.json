@@ -1,23 +1,23 @@
 {
   "name": "borey-89-owlbear",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "start": "node server/index.js",
-    "room:create": "node server/admin.js create",
-    "room:rotate": "node server/admin.js rotate",
+    "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
     "test:ui": "playwright test"
   },
   "dependencies": {
-    "@owlbear-rodeo/sdk": "3.1.0",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.1.0",
-    "helmet": "^8.1.0"
+    "@owlbear-rodeo/sdk": "3.1.0"
   },
-  "devDependencies": { "vite": "^7.2.0", "@playwright/test": "^1.56.1" }
+  "devDependencies": {
+    "vite": "^7.2.0",
+    "@playwright/test": "^1.56.1"
+  }
 }
