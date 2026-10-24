@@ -1,125 +1,72 @@
 import { test, expect } from '@playwright/test';
+import { mountRoom } from './harness.js';
+const base = process.env.BASE_PATH || '/borey-89/';
+const frame = (page, name) => page.frameLocator('#' + name);
 
-async function login(page, code) {
-  await page.goto('/');
-  await page.locator('#roomId').fill('browser-test-room');
-  await page.locator('#accessCode').fill('test-only-' + code);
-  await page.getByRole('button', { name: 'Подключиться к комнате' }).click();
-  await expect(page.locator('#sheet')).toBeVisible();
-}
-test('local MVP: all tabs, counters, symptoms, inventory, four professions and persistence at 360px', async ({ page }) => {
-  await page.setViewportSize({ width: 360, height: 800 });
-  await page.goto('/'); await page.locator('#localMode').click();
-  await page.locator('[data-change="health:-1"]').click();
-  await page.locator('[data-change="stress:1"]').click();
-  await expect(page.locator('#hpValue')).toHaveText('3 / 4');
-  await expect(page.locator('#stressValue')).toHaveText('1 / 6');
+test('GitHub Pages subpath serves manifest, bundled assets and icons', async ({ page, request }) => {
+  const manifest = await (await request.get('manifest.json')).json();
+  expect(manifest.manifest_version).toBe(1); expect(manifest.action.popover).toBe(base); expect(manifest.icon).toBe(base + 'icon.svg');
+  expect((await request.get(manifest.icon)).status()).toBe(200);
+  const errors = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto(base); await expect(page.locator('#sheet')).toBeVisible(); expect(errors).toEqual([]);
+  await expect(page.locator('#connectionStatus')).toContainText('ЛОКАЛЬНАЯ ПРОБА');
+  await expect(page.locator('#accessCode, #secret, #gmPanel')).toHaveCount(0);
+});
+
+test('existing design at 360px: tabs, counters, symptoms, inventory, name, notes, tasks and four professions', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 }); await page.goto(base);
+  await page.locator('[data-change="health:-1"]').click(); await page.locator('[data-change="stress:1"]').click();
+  await expect(page.locator('#hpValue')).toHaveText('3 / 4'); await expect(page.locator('#stressValue')).toHaveText('1 / 6');
   await page.getByLabel('Озноб', { exact: true }).check();
-  await page.locator('[data-tab="gear"]').click();
-  await page.locator('#itemInput').fill('<img src=x onerror=alert(1)>');
-  await page.locator('#addItem button').click();
-  await expect(page.locator('#itemList')).toContainText('<img src=x onerror=alert(1)>');
-  await expect(page.locator('#itemList img')).toHaveCount(0);
+  await page.locator('[data-tab="gear"]').click(); await page.locator('#itemInput').fill('<img src=x onerror=alert(1)>'); await page.locator('#addItem button').click();
+  await expect(page.locator('#itemList')).toContainText('<img src=x onerror=alert(1)>'); await expect(page.locator('#itemList img')).toHaveCount(0);
   await page.locator('#itemList .item').last().locator('button').click();
-  await page.locator('[data-tab="dossier"]').click();
-  await page.locator('#name').fill('Иванов Иван'); await page.locator('#secret').fill('Локальная тайна');
-  await page.locator('[data-tab="notes"]').click();
-  await page.locator('#notesText').fill('Найдена записка'); await page.locator('#tasksText').fill('Открыть шлюз');
-  await expect(page.locator('#saveStatus')).toHaveText('Сохранено в этом браузере');
-  for (let slot = 1; slot < 4; slot++) {
-    await page.locator('#role').selectOption(String(slot));
-    await expect(page.locator('#notesText')).toHaveValue('');
-    await expect(page.locator('#roleLabel')).toHaveText(['', 'Медик', 'Электрик', 'Механик'][slot]);
-  }
-  await page.locator('#role').selectOption('0');
-  await expect(page.locator('#notesText')).toHaveValue('Найдена записка');
-  await expect(page.locator('#gmPanel')).toBeHidden();
+  await page.locator('[data-tab="dossier"]').click(); await page.locator('#name').fill('Иванов Иван');
+  await page.locator('[data-tab="notes"]').click(); await page.locator('#notesText').fill('Найдена записка'); await page.locator('#tasksText').fill('Открыть шлюз');
+  await expect(page.locator('#saveStatus')).toHaveText('Сохранено в этом браузере (проба)');
+  for (let slot=1;slot<4;slot++) { await page.locator('#role').selectOption(String(slot)); await expect(page.locator('#notesText')).toHaveValue(''); }
+  await page.locator('#role').selectOption('0'); await expect(page.locator('#notesText')).toHaveValue('Найдена записка');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.locator('[data-tab="status"]').click();
-  await page.screenshot({ path: 'test-results/local-360.png', fullPage: true });
-  await page.reload(); await page.locator('#localMode').click();
-  await expect(page.locator('#hpValue')).toHaveText('3 / 4');
-  await page.locator('[data-tab="dossier"]').click();
-  await expect(page.locator('#secret')).toHaveValue('Локальная тайна');
-  await expect(page.locator('#name')).toHaveValue('Иванов Иван');
-  page.once('dialog', dialog => dialog.accept()); await page.locator('#reset').click();
-  await expect(page.locator('#name')).toHaveValue('');
-  await expect(page.locator('#saveStatus')).toHaveText('Сохранено в этом браузере');
+  await page.reload(); await expect(page.locator('#hpValue')).toHaveText('3 / 4');
+  await page.locator('[data-tab="dossier"]').click(); await expect(page.locator('#name')).toHaveValue('Иванов Иван');
+  await page.locator('[data-tab="notes"]').click(); await expect(page.locator('#tasksText')).toHaveValue('Открыть шлюз');
+  page.once('dialog',d=>d.accept()); await page.locator('#reset').click(); await expect(page.locator('#notesText')).toHaveValue('');
+  await expect(page.locator('#saveStatus')).toHaveText('Сохранено в этом браузере (проба)');
 });
 
-test('room sync in independent browsers, server privacy and GM-only controls', async ({ browser }) => {
-  const contexts = await Promise.all([browser.newContext(), browser.newContext(), browser.newContext()]);
-  const [gm, player, other] = await Promise.all(contexts.map(c => c.newPage()));
-  try {
-    await login(gm, 'gm'); await login(player, '0'); await login(other, '1');
-    await expect(gm.locator('#role option')).toHaveCount(4);
-    await expect(player.locator('#role option')).toHaveCount(1);
-    await expect(player.locator('#role')).toBeDisabled();
-    await expect(gm.locator('#gmPanel')).toBeVisible(); await expect(player.locator('#gmPanel')).toBeHidden();
-    await player.locator('[data-tab="dossier"]').click(); await player.locator('#secret').fill('SECRET_PLAYER_ZERO_UI');
-    await expect(player.locator('#saveStatus')).toHaveText('Сохранено в комнате');
-    await gm.locator('[data-tab="dossier"]').click(); await expect(gm.locator('#secret')).toHaveValue('SECRET_PLAYER_ZERO_UI', { timeout: 7000 });
-    await other.locator('[data-tab="dossier"]').click(); await expect(other.locator('#secret')).toHaveValue('');
-    await gm.locator('[data-tab="status"]').click(); await gm.locator('[data-change="infection:1"]').click(); await gm.locator('[data-change="hallucinations:1"]').click();
-    await expect(gm.locator('#saveStatus')).toHaveText('Сохранено в комнате');
-    const response = await player.waitForResponse(r => r.url().endsWith('/api/sheets') && r.request().method() === 'GET');
-    const dto = await response.json(); expect(dto.sheets).toHaveLength(1); expect(dto.sheets[0]).not.toHaveProperty('hidden');
-    await expect(player.locator('#infectionValue')).toHaveText(''); await expect(player.locator('#hallucinationsValue')).toHaveText('');
-    await gm.locator('[data-change="health:-1"]').click(); await expect(gm.locator('#saveStatus')).toHaveText('Сохранено в комнате');
-    await player.locator('[data-tab="status"]').click(); await expect(player.locator('#hpValue')).toHaveText('3 / 4', { timeout: 7000 });
-    await player.reload(); await expect(player.locator('#sheet')).toBeVisible(); await expect(player.locator('#hpValue')).toHaveText('3 / 4');
-    await player.locator('#logout').click(); await expect(player.locator('#loginForm')).toBeVisible();
-    await player.reload(); await expect(player.locator('#sheet')).toBeHidden();
-  } finally { await Promise.all(contexts.map(c => c.close())); }
+test('real SDK protocol: per-player sheets, GM subscription, reload persistence and modal under Pages subpath', async ({ page }) => {
+  await mountRoom(page, base);
+  const alice=frame(page,'alice'), bob=frame(page,'bob'), gm=frame(page,'gm');
+  await expect(alice.locator('#sheet')).toBeVisible(); await expect(gm.locator('#ownerControl')).toBeVisible(); await expect(bob.locator('#ownerControl')).toBeHidden();
+  await alice.locator('[data-tab="notes"]').click(); await alice.locator('#notesText').fill('Запись Алисы');
+  await expect(alice.locator('#saveStatus')).toHaveText('Сохранено в комнате Owlbear');
+  await bob.locator('[data-tab="notes"]').click(); await expect(bob.locator('#notesText')).toHaveValue('');
+  await gm.locator('#owner').selectOption('alice'); await gm.locator('[data-tab="notes"]').click(); await expect(gm.locator('#notesText')).toHaveValue('Запись Алисы');
+  await gm.locator('[data-tab="status"]').click(); await gm.locator('[data-change="health:-1"]').click(); await expect(gm.locator('#saveStatus')).toHaveText('Сохранено в комнате Owlbear');
+  await expect(alice.locator('#hpValue')).toHaveText('3 / 4');
+  await alice.locator('#role').selectOption('2'); await alice.locator('#notesText').fill('Электрик'); await expect(alice.locator('#saveStatus')).toHaveText('Сохранено в комнате Owlbear');
+  await alice.locator('#role').selectOption('0'); await expect(alice.locator('#notesText')).toHaveValue('Запись Алисы');
+  await bob.locator('#notesText').fill('Запись Боба'); await expect(bob.locator('#saveStatus')).toHaveText('Сохранено в комнате Owlbear');
+  await page.evaluate(() => { const f=document.querySelector('#alice'); f.src=f.src; });
+  await expect(alice.locator('#sheet')).toBeVisible(); await alice.locator('[data-tab="notes"]').click(); await expect(alice.locator('#notesText')).toHaveValue('Запись Алисы');
+  await alice.locator('#openWindow').click(); const modal=frame(page,'modal'); await expect(modal.locator('#sheet')).toBeVisible(); await expect(modal.locator('#hpValue')).toHaveText('3 / 4');
+  const url=await page.locator('#modal').getAttribute('src'); expect(new URL(url).pathname).toBe(base);
+  const data=await page.evaluate(()=>window.metadata); expect(Object.keys(data)).toHaveLength(3);
+  for(const value of Object.values(data)) expect(Object.keys(value.character).sort()).toEqual(['health','items','name','notes','stress','symptoms','tasks']);
 });
 
-test('stale edits preserve draft instead of overwriting the GM; network errors also preserve draft', async ({ page, request }) => {
-  await login(page, '2');
-  // Pause receiving remote updates, then simulate a concurrent GM write via the real API.
-  await page.route('**/api/sheets', route => route.request().method() === 'GET' ? route.abort() : route.continue());
-  const auth = await request.post('/api/login', { data: { code: 'test-only-gm', roomId: 'browser-test-room' } });
-  const { token } = await auth.json();
-  const headers = { Authorization: 'Bearer ' + token, 'X-OBR-Room': 'browser-test-room' };
-  const remote = await request.get('/api/sheets', { headers });
-  const snapshot = (await remote.json()).sheets[2];
-  const saved = await request.patch('/api/sheets/2', { headers, data: { revision: snapshot.revision, character: { ...snapshot.character, notes: 'SERVER_GM_CHANGE' }, hidden: snapshot.hidden } });
-  expect(saved.status()).toBe(200);
-  await page.locator('[data-tab="notes"]').click(); await page.locator('#notesText').fill('MY_UNSAVED_DRAFT');
-  await expect(page.locator('#conflictActions')).toBeVisible();
-  await expect(page.locator('#notesText')).toHaveValue('MY_UNSAVED_DRAFT');
-  const download = page.waitForEvent('download'); await page.locator('#exportDraft').click();
-  expect((await download).suggestedFilename()).toBe('borey89-private-draft.json');
-  await page.unroute('**/api/sheets');
-  page.once('dialog', dialog => dialog.accept()); await page.locator('#reloadRemote').click();
-  await expect(page.locator('#notesText')).toHaveValue('SERVER_GM_CHANGE');
-  await page.route('**/api/sheets/2', route => route.abort());
-  await page.locator('#notesText').fill('OFFLINE_DRAFT');
-  await expect(page.locator('#conflictActions')).toBeVisible();
-  await expect(page.locator('#notesText')).toHaveValue('OFFLINE_DRAFT');
-});
-
-test('official SDK handshake and modal request in an iframe harness (not a live Owlbear room)', async ({ page }) => {
-  await page.route('**/sdk-harness', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><body><script>
-    window.calls=[];
-    addEventListener('message', e => {
-      const m=e.data;
-      if(m.id==='OBR_PLAYER_GET_ID') e.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data:{id:'sdk-test-user'}},location.origin);
-      if(m.id==='OBR_MODAL_OPEN') { calls.push(m); e.source.postMessage({id:m.id+'_RESPONSE'+m.nonce,data:{}},location.origin); }
-    });
-    const frame=document.createElement('iframe'); frame.style='width:440px;height:800px';
-    frame.src='/?obrref='+encodeURIComponent(btoa(location.origin+' browser-test-room'));
-    frame.onload=()=>frame.contentWindow.postMessage({id:'OBR_READY',data:{ref:'test-ref',userId:'sdk-test-user'}},location.origin);
-    document.body.append(frame);
-  </script></body></html>` }));
-  await page.goto('/sdk-harness');
-  const frame = page.frameLocator('iframe');
-  await expect(frame.locator('#roomId')).toHaveValue('browser-test-room');
-  await expect(frame.locator('#roomId')).toHaveAttribute('readonly', '');
-  await frame.locator('#accessCode').fill('test-only-3');
-  await frame.getByRole('button', { name: 'Подключиться к комнате' }).click();
-  await expect(frame.locator('#sheet')).toBeVisible();
-  await frame.locator('#openWindow').click();
-  await expect.poll(() => page.evaluate(() => window.calls.length)).toBe(1);
-  const modal = await page.evaluate(() => window.calls[0].data);
-  expect(modal.id).toBe('borey89.sheet'); expect(modal.url).toContain('/?window=1'); expect(modal.url).not.toContain('b89_');
+test('SDK write failures preserve drafts, and remote edits during typing trigger conflict recovery', async ({ page }) => {
+  await mountRoom(page,base); const alice=frame(page,'alice'); await expect(alice.locator('#sheet')).toBeVisible();
+  await page.evaluate(()=>{window.failWrites=true;});
+  await alice.locator('[data-tab="notes"]').click(); await alice.locator('#notesText').fill('Черновик без связи');
+  await expect(alice.locator('#conflictActions')).toBeVisible(); await expect(alice.locator('#notesText')).toHaveValue('Черновик без связи');
+  await page.evaluate(()=>{window.failWrites=false;}); await alice.locator('#retrySave').click(); await expect(alice.locator('#saveStatus')).toHaveText('Сохранено в комнате Owlbear');
+  await alice.locator('#notesText').fill('Новый черновик');
+  await page.evaluate(()=>{
+    const key=Object.keys(metadata).find(k=>metadata[k].ownerId==='alice');
+    publish({[key]:{...metadata[key],revision:'competing-edit',character:{...metadata[key].character,notes:'Изменение ведущего'}}});
+  });
+  await expect(alice.locator('#conflictActions')).toBeVisible(); await expect(alice.locator('#notesText')).toHaveValue('Новый черновик');
+  const download=page.waitForEvent('download'); await alice.locator('#exportDraft').click(); expect((await download).suggestedFilename()).toBe('borey89-draft.json');
+  page.once('dialog',d=>d.accept()); await alice.locator('#reloadRemote').click(); await expect(alice.locator('#notesText')).toHaveValue('Изменение ведущего');
 });
